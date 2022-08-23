@@ -63,7 +63,7 @@ def getStudents():
     
     return list(students.keys()), essayTypes
 
-def downloadFiles(driveInfo, students, name, essayType):
+def downloadFiles(drive, driveInfo, students, name, essayType):
 
     begin = time.time()
 
