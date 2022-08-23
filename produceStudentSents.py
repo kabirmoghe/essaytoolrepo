@@ -14,6 +14,12 @@ try:
     import pandas as pd
     import modDriveConnect
     import clear
+    from oauth2client.service_account import ServiceAccountCredentials
+    import httplib2
+    import googleapiclient.discovery
+    from oauth2client.service_account import ServiceAccountCredentials
+    from google.oauth2 import service_account
+    from googleapiclient.http import MediaIoBaseDownload,MediaFileUpload
 
     def stringifyAndProcess(doc, nlp, studentName, essayType):
 
