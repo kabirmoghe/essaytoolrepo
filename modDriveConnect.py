@@ -63,223 +63,215 @@ def getStudents():
     
     return list(students.keys()), essayTypes
 
-def downloadFiles(name, essayType):
+def downloadFiles(driveInfo, students, name, essayType):
 
-	begin = time.time()
+    begin = time.time()
 
-	print("Setting Up")
+    print("Setting Up")
 
-	os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'creds.json'
-	drive = googleapiclient.discovery.build('drive','v3')
+    # STUDENT SPECIFIC
 
-	service = drive.files().list(fields='files(id, name, mimeType,parents)', pageSize=1000).execute()['files']
+    studentFolders = driveInfo[driveInfo["parents"] == students[name]]
+    studentFolders = studentFolders[studentFolders["name"] != "Administrative"]
 
-	driveInfo = pd.DataFrame(service)
+    if "Supplements" in studentFolders['name'].values:
+        suppFolders = driveInfo[driveInfo["parents"] == studentFolders[studentFolders["name"] == "Supplements"]["id"].values[0]]
+        studentFolders = pd.concat([studentFolders[studentFolders["name"] != "Supplements"], suppFolders])
 
-	driveInfo = driveInfo[(driveInfo["parents"].isnull() == False)]
-	driveInfo["parents"] = driveInfo["parents"].apply(lambda val: val[0])
+    folderId = studentFolders[studentFolders["name"] == essayType]["id"].iloc[0]
+    docsDf = driveInfo[driveInfo['parents'] == folderId]
 
-	students = dict(driveInfo[driveInfo["parents"] == '11Gd7KQQLMLZAuzD87ab3Gb1t8TvP11ZZ'][['name','id']].values)
+    docsDf = docsDf[docsDf["name"].str.contains("Draft")]
 
-	# STUDENT SPECIFIC
+    if len(docsDf) == 0:
+        return False
+    else:
 
-	studentFolders = driveInfo[driveInfo["parents"] == students[name]]
-	studentFolders = studentFolders[studentFolders["name"] != "Administrative"]
+        docIds = list(docsDf['id'])
+        docNames = list(docsDf['name'])
 
-	if "Supplements" in studentFolders['name'].values:
-		suppFolders = driveInfo[driveInfo["parents"] == studentFolders[studentFolders["name"] == "Supplements"]["id"].values[0]]
-		studentFolders = pd.concat([studentFolders[studentFolders["name"] != "Supplements"], suppFolders])
+        # Makes parent directory for student
 
-	folderId = studentFolders[studentFolders["name"] == essayType]["id"].iloc[0]
-	docsDf = driveInfo[driveInfo['parents'] == folderId]
+        print("Creating Directories")
 
-	docsDf = docsDf[docsDf["name"].str.contains("Draft")]
-   
-	docIds = list(docsDf['id'])
-	docNames = list(docsDf['name'])
-	    
-	# Makes parent directory for student
+        if name not in os.listdir():
+            os.mkdir(name)
 
-	print("Creating Directories")
+            os.mkdir("{}/{}".format(name, essayType))
 
-	if name not in os.listdir():
-	    os.mkdir(name)
+        else:
+            if essayType not in os.listdir(name):
+                os.mkdir("{}/{}".format(name, essayType))
 
-	    os.mkdir("{}/{}".format(name, essayType))
+        # Docs
 
-	else:
-		if essayType not in os.listdir(name):
-			os.mkdir("{}/{}".format(name, essayType))
+        print("Creating Docs")
 
-	# Docs
+        docStart = time.time()
 
-	print("Creating Docs")
+        currentDocs = os.listdir("{}/{}".format(name, essayType))
+        currentDocs = [doc.split('.docx')[0] for doc in currentDocs]     
 
-	docStart = time.time()
+        toSkip = []
 
-	currentDocs = os.listdir("{}/{}".format(name, essayType))
-	currentDocs = [doc.split('.docx')[0] for doc in currentDocs]     
+        for i in range(len(docIds)):
 
-	toSkip = []
+            docName = docNames[i]
 
-	for i in range(len(docIds)):
-	    
-	    docName = docNames[i]
-	    
-	    if docName not in currentDocs:
-	        
-	        print("Downloading {}".format(docName))
-	    
-	        doc = drive.files().export_media(fileId = docIds[i], mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document").execute()
+            if docName not in currentDocs:
 
-	        with open("{}/{}/{}.docx".format(name, essayType, docName), "wb") as f:
-	            f.write(doc)
-	    else:
+                print("Downloading {}".format(docName))
 
-	        print("Skipping {}".format(docName))
+                doc = drive.files().export_media(fileId = docIds[i], mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document").execute()
 
-	        toSkip.append(i)
-	        
-	docEnd = time.time()
-	        
-	print("Docs Time: {}".format(round(docEnd-docStart, 1)))
-	        
-	# Insights
-	    
-	print("Creating insights")
+                with open("{}/{}/{}.docx".format(name, essayType, docName), "wb") as f:
+                    f.write(doc)
+            else:
 
-	insightsStart = time.time()
+                print("Skipping {}".format(docName))
 
-	# sheet = df[df["mimeType"] == "application/vnd.google-apps.spreadsheet"]
+                toSkip.append(i)
 
-	# sheetName = list(sheet['name'])[0]
+        docEnd = time.time()
 
-	# # sheets = df[df["mimeType"] == "application/vnd.google-apps.spreadsheet"]
+        print("Docs Time: {}".format(round(docEnd-docStart, 1)))
 
-	# #sheetNames = list(sheets['name'])
+        # Insights
 
-	# # currentSheets = os.listdir("{}/Sheets".format(name))
-	# # currentSheets = [sheet.split('.csv')[0] for sheet in currentSheets]                      
+    #     print("Creating insights")
 
-	# # for sheetName in sheetNames:
-	    
-	# #     if sheetName not in currentSheets:
+    #     insightsStart = time.time()
 
-	# #         sheet = client.open(sheetName).sheet1
+        # sheet = df[df["mimeType"] == "application/vnd.google-apps.spreadsheet"]
 
-	# #         print("Downloading {}".format(sheetName))
+        # sheetName = list(sheet['name'])[0]
 
-	# #         df = pd.DataFrame(sheet.get_all_records())
+        # # sheets = df[df["mimeType"] == "application/vnd.google-apps.spreadsheet"]
 
-	# #         df.to_csv("{}/Sheets/{}.csv".format(name, sheetName))
-	# #     else:
-	# #         print("Skipping {}".format(sheetName))
+        # #sheetNames = list(sheets['name'])
 
-	# sheet = client.open(sheetName).sheet1
-	# print("Downloading {}".format(sheetName))
-	# df = pd.DataFrame(sheet.get_all_records())
-	# df.to_csv("{}/Sheets/{}.csv".format(name, sheetName))
-	    
-	draftNums = [int(name.split()[-1].split('#')[-1]) for name in docNames]
+        # # currentSheets = os.listdir("{}/Sheets".format(name))
+        # # currentSheets = [sheet.split('.csv')[0] for sheet in currentSheets]                      
 
-	commentTallies = []
-	subs = []
+        # # for sheetName in sheetNames:
 
-	for i in range(len(docIds)):
-	    
-	    docId = docIds[i]
-	    
-	    # commentList = drive.comments().list(fileId=docId,fields='comments', pageSize=999).execute() 
-	        
-	    # comments = []
+        # #     if sheetName not in currentSheets:
 
-	    # for comment in commentList.get('comments'):         
-	    #     comments.append(comment['content'])
+        # #         sheet = client.open(sheetName).sheet1
 
-	    comments = []
+        # #         print("Downloading {}".format(sheetName))
 
-	    hasNext = True
-	    token = ""
+        # #         df = pd.DataFrame(sheet.get_all_records())
 
-	    while hasNext:
+        # #         df.to_csv("{}/Sheets/{}.csv".format(name, sheetName))
+        # #     else:
+        # #         print("Skipping {}".format(sheetName))
 
-	    	commentDict = drive.comments().list(fileId=docId,fields='nextPageToken, comments', pageSize=100, pageToken=token).execute()   
+        # sheet = client.open(sheetName).sheet1
+        # print("Downloading {}".format(sheetName))
+        # df = pd.DataFrame(sheet.get_all_records())
+        # df.to_csv("{}/Sheets/{}.csv".format(name, sheetName))
 
-	    	for comment in commentDict.get('comments'):         
-	    		comments.append(comment['content'])
+    #     draftNums = [int(name.split()[-1].split('#')[-1]) for name in docNames]
 
-	    	if 'nextPageToken' in commentDict.keys():
-	    		token = commentDict["nextPageToken"]
-	    	else:
-	    		hasNext = False
+    #     commentTallies = []
+    #     subs = []
 
-	    admi = 0 
-	    mech = 0 
-	    stru = 0
-	    idea = 0
-	    sati = 0
-	    date = ''
+    #     for i in range(len(docIds)):
 
-	    for comment in comments:
-	        if "[Administrative Comment]" in comment or "[AC]" in comment:
-	            admi += 1
-	        elif "[Mechanical Comment]" in comment or "[MC]" in comment:
-	            mech += 1
-	        elif "[Structural Comment]" in comment or "[SC]" in comment:
-	            stru += 1
-	        elif "[Ideational Comment]" in comment or "[IC]" in comment:
-	            idea += 1
-	        elif "[Self Eval]" in comment or "[Self-Eval]" in comment or "[Submission Info]" in comment:
-	        	
-	        	date = comment.split("Submission Date:")[-1].split("Date of Submission:")[-1].replace(u'\xa0', '')
-	        	strSati = comment.split("Satisfaction:")[1].split("\n")[0].strip()
+    #         docId = docIds[i]
 
-		        if strSati == '':
-		            sati = 0.0
-		        else:
-		            sati = float(strSati)
+    #         # commentList = drive.comments().list(fileId=docId,fields='comments', pageSize=999).execute() 
 
-	    total = admi+mech+stru+idea
+    #         # comments = []
 
-	    commentTallies.append([total, admi, mech, stru, idea, sati, date])
+    #         # for comment in commentList.get('comments'):         
+    #         #     comments.append(comment['content'])
 
+    #         comments = []
 
-	print(commentTallies)
+    #         hasNext = True
+    #         token = ""
 
-	commentDf = pd.DataFrame(commentTallies, columns=["Total Tallies","Administrative Tallies", "Mechanical Tallies", "Structural Tallies", "Ideational Tallies", "Satisfaction Level", "Submission Date"])
-	commentDf["Draft Number"] = draftNums
+    #         while hasNext:
 
-	#print(range(len(draftNums)))
+    #             commentDict = drive.comments().list(fileId=docId,fields='nextPageToken, comments', pageSize=100, pageToken=token).execute()   
 
-	commentDf["Shared Drafts"] = range(1, len(draftNums)+1)
-	commentDf["Student Name"] = name
-	commentDf["Total Words"] = 0
-	commentDf["Essay Type"] = "College Essay"
-	commentDf["Comments/Words"] = commentDf["Total Tallies"]
+    #             for comment in commentDict.get('comments'):         
+    #                 comments.append(comment['content'])
 
-	commentDf = commentDf.sort_values(by="Draft Number").reindex(columns=["Student Name","Essay Type","Draft Number","Total Tallies","Total Words","Comments/Words","Satisfaction Level", "Administrative Tallies", "Mechanical Tallies", "Ideational Tallies", "Structural Tallies", "Submission Date","Shared Drafts"]).reset_index(drop=True)
+    #             if 'nextPageToken' in commentDict.keys():
+    #                 token = commentDict["nextPageToken"]
+    #             else:
+    #                 hasNext = False
 
-	drafts = len(commentDf)
-	comments = commentDf["Total Tallies"].sum()
-	words = commentDf["Total Words"].sum()
-	administrative = commentDf["Administrative Tallies"].sum()
-	mechanical = commentDf["Mechanical Tallies"].sum()
-	ideational = commentDf["Ideational Tallies"].sum()
-	structural = commentDf["Structural Tallies"].sum()
-	submission = commentDf["Submission Date"].iloc[-1]
+    #         admi = 0 
+    #         mech = 0 
+    #         stru = 0
+    #         idea = 0
+    #         sati = 0
+    #         date = ''
 
-	drafts_total = commentDf["Draft Number"].iloc[-1]
+    #         for comment in comments:
+    #             if "[Administrative Comment]" in comment or "[AC]" in comment:
+    #                 admi += 1
+    #             elif "[Mechanical Comment]" in comment or "[MC]" in comment:
+    #                 mech += 1
+    #             elif "[Structural Comment]" in comment or "[SC]" in comment:
+    #                 stru += 1
+    #             elif "[Ideational Comment]" in comment or "[IC]" in comment:
+    #                 idea += 1
+    #             elif "[Self Eval]" in comment or "[Self-Eval]" in comment or "[Submission Info]" in comment:
 
-	insightsEnd = time.time()
-	        
-	print("Insights Time: {}".format(round(insightsEnd-insightsStart, 1)))
-	    
-	print("Finished Connecting and Downloading")
+    #                 date = comment.split("Submission Date:")[-1].split("Date of Submission:")[-1].replace(u'\xa0', '')
+    #                 strSati = comment.split("Satisfaction:")[1].split("\n")[0].strip()
 
-	end = time.time()
+    #                 if strSati == '':
+    #                     sati = 0.0
+    #                 else:
+    #                     sati = float(strSati)
 
-	total = round(end-begin, 1)
+    #         total = admi+mech+stru+idea
 
-	print("Total: {} seconds".format(total))
+    #         commentTallies.append([total, admi, mech, stru, idea, sati, date])
 
-	# return toSkip, [drafts, comments, words, comments, administrative, mechanical, ideational, structural, submission, drafts_total], commentDf
+
+    #     print(commentTallies)
+
+    #     commentDf = pd.DataFrame(commentTallies, columns=["Total Tallies","Administrative Tallies", "Mechanical Tallies", "Structural Tallies", "Ideational Tallies", "Satisfaction Level", "Submission Date"])
+    #     commentDf["Draft Number"] = draftNums
+
+    #     #print(range(len(draftNums)))
+
+    #     commentDf["Shared Drafts"] = range(1, len(draftNums)+1)
+    #     commentDf["Student Name"] = name
+    #     commentDf["Total Words"] = 0
+    #     commentDf["Essay Type"] = "College Essay"
+    #     commentDf["Comments/Words"] = commentDf["Total Tallies"]
+
+    #     commentDf = commentDf.sort_values(by="Draft Number").reindex(columns=["Student Name","Essay Type","Draft Number","Total Tallies","Total Words","Comments/Words","Satisfaction Level", "Administrative Tallies", "Mechanical Tallies", "Ideational Tallies", "Structural Tallies", "Submission Date","Shared Drafts"]).reset_index(drop=True)
+
+    #     drafts = len(commentDf)
+    #     comments = commentDf["Total Tallies"].sum()
+    #     words = commentDf["Total Words"].sum()
+    #     administrative = commentDf["Administrative Tallies"].sum()
+    #     mechanical = commentDf["Mechanical Tallies"].sum()
+    #     ideational = commentDf["Ideational Tallies"].sum()
+    #     structural = commentDf["Structural Tallies"].sum()
+    #     submission = commentDf["Submission Date"].iloc[-1]
+
+    #     drafts_total = commentDf["Draft Number"].iloc[-1]
+
+    #     insightsEnd = time.time()
+
+    #     print("Insights Time: {}".format(round(insightsEnd-insightsStart, 1)))
+
+        print("Finished Connecting and Downloading")
+
+        end = time.time()
+
+        total = round(end-begin, 1)
+
+        print("Total: {} seconds".format(total))
+
+        return True
