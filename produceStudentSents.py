@@ -264,7 +264,7 @@ try:
                     print("--")
                     print("Student: {}".format(studentName))              
 
-                    hasDocs = modDriveConnect.downloadFiles(driveInfo, students, studentName, essayType)
+                    hasDocs = modDriveConnect.downloadFiles(drive, driveInfo, students, studentName, essayType)
 
                     if hasDocs:
 
