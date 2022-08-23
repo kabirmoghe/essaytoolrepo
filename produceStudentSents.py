@@ -235,56 +235,121 @@ try:
         stanzaNLP = stanza.Pipeline('en', use_gpu=False, processors='tokenize,pos,constituency')
 
         client = boto3.client('s3')
+        
+        # Does Drive API Call ONCE
 
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'creds.json'
+        drive = googleapiclient.discovery.build('drive','v3')
+
+        service = drive.files().list(fields='files(id, name, mimeType,parents)', pageSize=1000).execute()['files']
+
+        driveInfo = pd.DataFrame(service)
+
+        driveInfo = driveInfo[(driveInfo["parents"].isnull() == False)]
+        driveInfo["parents"] = driveInfo["parents"].apply(lambda val: val[0])
+
+        students = dict(driveInfo[driveInfo["parents"] == '11Gd7KQQLMLZAuzD87ab3Gb1t8TvP11ZZ'][['name','id']].values)
+        
         for studentName in studentNames:
             for essayType in essayTypes[studentName]:
 
                 try:
-
+                    
                     print("--")
-                    print("Student: {}".format(studentName))
+                    print("Student: {}".format(studentName))              
 
-                    modDriveConnect.downloadFiles(studentName, essayType)
+                    hasDocs = modDriveConnect.downloadFiles(driveInfo, students, studentName, essayType)
 
-                    docs = os.listdir("{}/{}".format(studentName, essayType))
+                    if hasDocs:
 
-                    numForDraft = {}
+                        docs = os.listdir("{}/{}".format(studentName, essayType))
 
-                    draftNums = [int(doc.split(".")[0].split()[-1].split("#")[-1]) for doc in docs]
+                        numForDraft = {}
 
-                    for i in range(len(docs)):
-                        doc = docs[i]
-                        numForDraft[doc] = draftNums[i]
+                        draftNums = [int(doc.split(".")[0].split()[-1].split("#")[-1]) for doc in docs]
 
-                    docs = [pair[0] for pair in sorted(numForDraft.items(),key=lambda item: item[1], reverse=False)]
-                    draftNums = sorted(draftNums)
+                        for i in range(len(docs)):
+                            doc = docs[i]
+                            numForDraft[doc] = draftNums[i]
 
-                    actualNumDocs = len(docs)
+                        docs = [pair[0] for pair in sorted(numForDraft.items(),key=lambda item: item[1], reverse=False)]
+                        draftNums = sorted(draftNums)
 
-                    print("Getting S3 doc info...")
+                        actualNumDocs = len(docs)
 
-                    try: 
-                        bucketInfo, bucketSents = readStudentSentInfo(studentName, essayType)
+                        print("Getting S3 doc info...")
 
-                        s3Docs = len(bucketInfo) # The number of "DocInfos" for the first returned object from the method
+                        try: 
+                            bucketInfo, bucketSents = readStudentSentInfo(studentName, essayType)
 
-                        index = s3Docs-actualNumDocs
+                            s3Docs = len(bucketInfo) # The number of "DocInfos" for the first returned object from the method
 
-                        if len(docs) > 0 and index < 0:
-                            docs = docs[index:]
+                            index = s3Docs-actualNumDocs
 
-                            nextIndex = bucketInfo[-1][1]
+                            if len(docs) > 0 and index < 0:
+                                docs = docs[index:]
+
+                                nextIndex = bucketInfo[-1][1]
+
+                                for doc in docs:
+
+                                    processedSentInfo = stringifyAndProcess(doc, stanzaNLP, studentName, essayType)
+                                    allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)
+
+                                    bucketInfo.append(allSentenceInfo)
+                                    bucketSents.append(sentList)
+
+                                    allDf = pd.DataFrame(bucketInfo)
+                                    sentDf = pd.DataFrame(bucketSents)
+
+                                    fileName = "{}_{}_all.csv".format(studentName, essayType)
+                                    bucketName = 'essaytool'
+
+                                    csv_buffer = StringIO()
+                                    allDf.to_csv(csv_buffer)
+
+                                    response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)
+
+                                    fileName = "{}_{}_sents.csv".format(studentName, essayType)
+
+                                    csv_buffer = StringIO()
+                                    sentDf.to_csv(csv_buffer)
+
+                                    response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)
+                            else:
+                                print("No new information")
+                        except:
+                            print("No Information in bucket")
+
+                            nextIndex = 0
 
                             for doc in docs:
 
                                 processedSentInfo = stringifyAndProcess(doc, stanzaNLP, studentName, essayType)
-                                allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)
 
-                                bucketInfo.append(allSentenceInfo)
-                                bucketSents.append(sentList)
+                                if nextIndex > 0:
 
-                                allDf = pd.DataFrame(bucketInfo)
-                                sentDf = pd.DataFrame(bucketSents)
+        #                             print("Not first draft")
+
+                                    bucketInfo, bucketSents = readStudentSentInfo(studentName, essayType)                
+
+                                    allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)  
+
+                                    bucketInfo.append(allSentenceInfo)
+                                    bucketSents.append(sentList)    
+
+                                    allDf = pd.DataFrame(bucketInfo)
+                                    sentDf = pd.DataFrame(bucketSents)
+
+                                else:
+
+        #                             print("First draft")
+
+                                    allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)  
+
+                                    allDf = pd.DataFrame([allSentenceInfo])
+
+                                    sentDf = pd.DataFrame([sentList]) 
 
                                 fileName = "{}_{}_all.csv".format(studentName, essayType)
                                 bucketName = 'essaytool'
@@ -299,57 +364,9 @@ try:
                                 csv_buffer = StringIO()
                                 sentDf.to_csv(csv_buffer)
 
-                                response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)
-                        else:
-                            print("No new information")
-                    except:
-                        print("No Information in bucket")
-
-                        nextIndex = 0
-
-                        for doc in docs:
-
-                            processedSentInfo = stringifyAndProcess(doc, stanzaNLP, studentName, essayType)
-
-                            if nextIndex > 0:
-
-    #                             print("Not first draft")
-
-                                bucketInfo, bucketSents = readStudentSentInfo(studentName, essayType)                
-
-                                allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)  
-
-                                bucketInfo.append(allSentenceInfo)
-                                bucketSents.append(sentList)    
-
-                                allDf = pd.DataFrame(bucketInfo)
-                                sentDf = pd.DataFrame(bucketSents)
-
-                            else:
-
-    #                             print("First draft")
-
-                                allSentenceInfo, sentList, nextIndex = docSentence(processedSentInfo, nextIndex)  
-
-                                allDf = pd.DataFrame([allSentenceInfo])
-
-                                sentDf = pd.DataFrame([sentList]) 
-
-                            fileName = "{}_{}_all.csv".format(studentName, essayType)
-                            bucketName = 'essaytool'
-
-                            csv_buffer = StringIO()
-                            allDf.to_csv(csv_buffer)
-
-                            response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)
-
-                            fileName = "{}_{}_sents.csv".format(studentName, essayType)
-
-                            csv_buffer = StringIO()
-                            sentDf.to_csv(csv_buffer)
-
-                            response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)                    
-
+                                response = client.put_object(Body = csv_buffer.getvalue(), Bucket = bucketName, Key = fileName)                    
+                    else:
+                        print("No docs, moving to next student...")
                 except Exception as e:
                     print(e)
 
